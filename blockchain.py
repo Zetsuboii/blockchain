@@ -80,7 +80,7 @@ class Blockchain(object):
         # our network
         for node in neighbours:
             # get the blockchain from other nodes
-            response = requests.get(f'http:/{node}/blockchain')
+            response = requests.get(f'http://{node}/blockchain')
 
             if response.status_code == 200:
                 length = response.json()['length']
