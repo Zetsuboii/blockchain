@@ -20,6 +20,9 @@ class Blockchain(object):
         return hashlib.sha256(block_encoded).hexdigest()
 
     def __init__(self):
+        # stores other nodes in the network
+        self.nodes = set()
+
         # stores all blocks in the entire blockchain
         self.chain = []
 
@@ -34,6 +37,68 @@ class Blockchain(object):
             hash_of_previous_block=genesis_hash,
             nonce=self.proof_of_work(0, genesis_hash, [])
         )
+
+    def add_node(self, address):
+        parsed_url = urlparse(address)
+        self.nodes.add(parsed_url.netloc)
+        print(f'Added {parsed_url.netloc} to nodes')
+
+    def valid_chain(self, chain):
+        last_block = chain[0]  # genesis block
+        current_index = 1
+
+        while current_index < len(chain):
+            # check for previous hash
+            block = chain[current_index]
+            if block['hash_of_previous_block'] != self.hash_block(last_block):
+                return False
+
+            # check for valid nonce
+            if not self.valid_proof(
+                current_index,
+                block['hash_of_previous_block'],
+                block['transactions'],
+                block['nonce']
+            ):
+                return False
+
+            # step
+            last_block = block
+            current_index += 1
+
+        return True
+
+    def update_blockchain(self):
+        # get the nodes around
+        neighbours = self.nodes
+        new_chain = None
+
+        # for simplicity, look for chains longer than ours
+        max_length = len(self.chain)
+
+        # grab and verify the chains from all the nodes in
+        # our network
+        for node in neighbours:
+            # get the blockchain from other nodes
+            response = requests.get(f'http:/{node}/blockchain')
+
+            if response.status_code == 200:
+                length = response.json()['length']
+                chain = response.json()['chain']
+
+                # check if the length is longer and the chain
+                # is valid
+                if length > max_length and self.valid_chain(chain):
+                    max_length = length
+                    new_chain = chain
+
+        # replace our chain if we discovered a new, valid
+        # chain longer than ours
+        if new_chain:
+            self.chain = new_chain
+            return True
+
+        return False
 
     def proof_of_work(self, index, hash_of_previous_block, transactions):
         # try with nonce 0
@@ -156,6 +221,43 @@ def new_transaction():
 
     response = {'message': f'Transaction will be added to Block {index}'}
     return (jsonify(response), 201)
+
+
+@app.route('/nodes/add_nodes', methods=['POST'])
+def add_nodes():
+    # get the nodes passed in from the client
+    values = request.get_json()
+    # gets nodes or Nones from the dictionary
+    nodes = values.get('nodes')
+
+    if nodes is None:
+        return 'Error: Missing node(s) info', 400
+
+    for node in nodes:
+        blockchain.add_node(node)
+
+    response = {
+        'message': 'New nodes added',
+        'nodes': list(blockchain.nodes)
+    }
+    return jsonify(response), 201
+
+
+@app.route('/nodes/sync', methods=['GET'])
+def sync():
+    updated = blockchain.update_blockchain()
+    if updated:
+        response = {
+            'message': 'The blockchain has ben updated to the latest',
+            'blockchain': blockchain.chain
+        }
+    else:
+        response = {
+            'message': 'Our blockchain is the latest',
+            'blockchain': blockchain.chain
+        }
+
+    return jsonify(response), 200
 
 
 if __name__ == '__main__':
